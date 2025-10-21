@@ -4,6 +4,7 @@ from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import ensure_csrf_cookie
 from datetime import date, time, datetime
+from pms.reservation_code.generate import get
 from .form_dates import Ymd
 from .forms import *
 from .models import Room
@@ -21,7 +22,12 @@ class BookingSearchView(View):
             | Q(customer__name__icontains=query["filter"])
         ).order_by("-created")
         room_search_form = RoomSearchForm()
-        context = {"bookings": bookings, "form": room_search_form, "filter": True}
+        context = {
+            "bookings": bookings,
+            "form": room_search_form,
+            "filter": True,
+            "menu_home": "active btn btn-primary",
+        }
         return render(request, "home.html", context)
 
 
@@ -70,6 +76,7 @@ class RoomSearchView(View):
             "query": query,
             "url_query": url_query,
             "data": data,
+            "menu_reserva": "active btn btn-primary",
         }
         return render(request, "search.html", context)
 
@@ -133,7 +140,7 @@ class DeleteBookingView(View):
     # renders the booking deletion form
     def get(self, request, pk):
         booking = Booking.objects.get(id=pk)
-        context = {"booking": booking}
+        context = {"booking": booking, "menu_home": "active btn btn-primary"}
         return render(request, "delete_booking.html", context)
 
     # deletes the booking
@@ -148,7 +155,11 @@ class EditBookingView(View):
         booking = Booking.objects.get(id=pk)
         booking_form = BookingForm(prefix="booking", instance=booking)
         customer_form = CustomerForm(prefix="customer", instance=booking.customer)
-        context = {"booking_form": booking_form, "customer_form": customer_form}
+        context = {
+            "booking_form": booking_form,
+            "customer_form": customer_form,
+            "menu_home": "active btn btn-primary",
+        }
         return render(request, "edit_booking.html", context)
 
     # updates the customer form
@@ -161,6 +172,49 @@ class EditBookingView(View):
         if customer_form.is_valid():
             customer_form.save()
             return redirect("/")
+
+
+class EditBookingDatesView(View):
+    def get(self, request, pk):
+        booking = Booking.objects.get(id=pk)
+        dates_form = BookingDatesForm(instance=booking)
+        context = {
+            "booking": booking,
+            "dates_form": dates_form,
+            "menu_home": "active btn btn-primary",
+        }
+        return render(request, "edit_booking_dates.html", context)
+
+    @method_decorator(ensure_csrf_cookie)
+    def post(self, request, pk):
+        booking = Booking.objects.get(id=pk)
+        dates_form = BookingDatesForm(request.POST, instance=booking)
+
+        if dates_form.is_valid():
+            new_checkin = dates_form.cleaned_data["checkin"]
+            new_checkout = dates_form.cleaned_data["checkout"]
+
+            validate_bookings = Booking.objects.filter(
+                room=booking.room,
+                state="NEW",
+                checkin__lt=new_checkout,
+                checkout__gt=new_checkin,
+            ).exclude(id=pk)
+
+            if validate_bookings.exists():
+                dates_form.add_error(
+                    None, "No hay disponibilidad para las fechas seleccionadas."
+                )
+            else:
+                dates_form.save()
+                return redirect("/")
+
+        context = {
+            "booking": booking,
+            "dates_form": dates_form,
+            "menu_home": "active btn btn-primary",
+        }
+        return render(request, "edit_booking_dates.html", context)
 
 
 class DashboardView(View):
@@ -229,8 +283,11 @@ class RoomDetailsView(View):
         # renders room details
         room = Room.objects.get(id=pk)
         bookings = room.booking_set.all()
-        context = {"room": room, "bookings": bookings}
-        print(context)
+        context = {
+            "room": room,
+            "bookings": bookings,
+            "menu_rooms": "active btn btn-primary",
+        }
         return render(request, "room_detail.html", context)
 
 
@@ -238,23 +295,12 @@ class RoomsView(View):
     def get(self, request):
         # renders a list of rooms
         rooms = Room.objects.all().values("name", "room_type__name", "id")
-        context = {"rooms": rooms, "menu_rooms": "active btn btn-primary"}
-        return render(request, "rooms.html", context)
-
-
-class RoomsFilterView(View):
-    def get(self, request):
         room = request.GET.get("room", "").strip()
-        if not room:
-            return redirect("rooms")
-        room_search_form = (
-            Room.objects.filter(Q(name__icontains=room))
-            .values("name", "room_type__name", "id")
-            .order_by("name")
-        )
-        context = {
-            "rooms": room_search_form,
-            "room": room,
-            "menu_rooms": "active btn btn-primary",
-        }
+        if room:
+            rooms = (
+                Room.objects.filter(Q(name__icontains=room))
+                .values("name", "room_type__name", "id")
+                .order_by("name")
+            )
+        context = {"rooms": rooms, "menu_rooms": "active btn btn-primary"}
         return render(request, "rooms.html", context)
