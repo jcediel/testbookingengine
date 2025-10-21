@@ -3,7 +3,7 @@ from django.shortcuts import render, redirect
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import ensure_csrf_cookie
-
+from datetime import date, time, datetime
 from .form_dates import Ymd
 from .forms import *
 from .models import Room
@@ -165,7 +165,6 @@ class EditBookingView(View):
 
 class DashboardView(View):
     def get(self, request):
-        from datetime import date, time, datetime
 
         today = date.today()
 
@@ -194,12 +193,31 @@ class DashboardView(View):
             .aggregate(Sum("total"))
         )
 
+        total_rooms = Room.objects.count()
+
+        if total_rooms > 0:
+            occupied_rooms = (
+                Booking.objects.filter(
+                    checkin__lte=today, checkout__gte=today, state=Booking.NEW
+                )
+                .values("room")
+                .distinct()
+                .count()
+            )
+
+            percentage_occupancy = round((occupied_rooms / total_rooms) * 100, 1)
+        else:
+            percentage_occupancy = 0
+
         # preparing context data
         dashboard = {
             "new_bookings": new_bookings,
             "incoming_guests": incoming,
             "outcoming_guests": outcoming,
             "invoiced": invoiced,
+            "percentage_occupancy": percentage_occupancy,
+            "occupied_rooms": occupied_rooms if total_rooms > 0 else 0,
+            "total_rooms": total_rooms,
         }
 
         context = {"dashboard": dashboard, "menu_dashboard": "active btn btn-primary"}
